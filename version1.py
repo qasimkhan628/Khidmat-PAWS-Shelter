@@ -5,7 +5,22 @@ import google.generativeai as genai
 from datetime import date
 import time
 
+from supabase import create_client, Client
+
+from dotenv import load_dotenv
+load_dotenv()
+
+# these pick up whatever you’ve exported in your shell
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("You must set SUPABASE_URL & SUPABASE_KEY in your environment")
+
+sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 # --- CONFIGURATION ---
+
 
 # Securely get the API key from environment variables
 # IMPORTANT: Make sure you have set the GOOGLE_API_KEY environment variable
@@ -120,10 +135,20 @@ def main():
         extracted_data = process_audio_file(file_path, model)
         
         if extracted_data:
-            # Add the current date to the record
-            extracted_data['date'] = date.today().strftime('%Y-%m-%d')
-            all_records.append(extracted_data)
-            print(f"  - Success: Data extracted for {filename}.")
+            # Prepare data for Supabase
+            record = {
+                "patient_id": int(extracted_data.get("patient_id", 0)),  # Ensure int
+                "patient_name": extracted_data.get("patient_name", "N/A"),
+                "patient_dose": extracted_data.get("patient_dose", "N/A"),
+                "notes": extracted_data.get("notes_for_doctor", "N/A"),
+                "record_date": date.today().strftime('%Y-%m-%d'),
+            }
+            try:
+                sb.table("veterinary_records").insert(record).execute()
+                print(f"  - Success: Data inserted into Supabase for {filename}.")
+            except Exception as e:
+                print(f"  - Error inserting into Supabase for {filename}: {e}")
+            all_records.append(record)
         else:
             print(f"  - Failed: Could not process {filename}.")
 
@@ -141,8 +166,8 @@ def main():
         'patient_id': 'Patient ID',
         'patient_name': 'Patient Name',
         'patient_dose': 'Patient Dose',
-        'notes_for_doctor': 'Notes for doctor',
-        'date': 'Date'
+        'notes': 'Notes for doctor',
+        'record_date': 'Date'
     })
     
     # Ensure the column order is exactly as requested
