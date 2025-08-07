@@ -9,6 +9,7 @@ import time
 import streamlit as st
 from supabase import create_client, Client
 from dotenv import load_dotenv
+import io
 
 # --- INITIALIZATION AND CONFIGURATION ---
 
@@ -189,7 +190,10 @@ if st.button("✨ Process Audio Files", type="primary", disabled=not uploaded_fi
         # Provide a download button for the results as an Excel file
         @st.cache_data
         def convert_df_to_excel(df):
-            return df.to_excel(index=False, engine='openpyxl')
+            output = io.BytesIO()
+            df.to_excel(output, index=False, engine='openpyxl')
+            output.seek(0)
+            return output.getvalue()
 
         excel_data = convert_df_to_excel(final_df)
         st.download_button(
