@@ -16,11 +16,23 @@ import io
 # Load environment variables from a .env file
 load_dotenv()
 
+# Helper to safely read secrets if a secrets file is not configured
+def get_env_or_secret(key: str, default: str | None = None):
+    value = os.getenv(key)
+    if value:
+        return value
+    try:
+        return st.secrets.get(key, default)  # may raise if secrets missing; handled by try
+    except Exception:
+        return default
+
 # Securely get API keys and Supabase URL from environment variables
 # These are configured in Streamlit's secrets manager for deployed apps
-SUPABASE_URL = os.getenv("SUPABASE_URL") or st.secrets.get("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY") or st.secrets.get("SUPABASE_KEY")
-API_KEY = os.getenv('GOOGLE_API_KEY') or st.secrets.get("GOOGLE_API_KEY")
+SUPABASE_URL = get_env_or_secret("SUPABASE_URL")
+SUPABASE_KEY = get_env_or_secret("SUPABASE_KEY")
+API_KEY = get_env_or_secret('GOOGLE_API_KEY')
+# Allow specifying a non-public schema; default to public
+SUPABASE_SCHEMA = get_env_or_secret("SUPABASE_SCHEMA", "public") or "public"
 
 # --- Function to check for required credentials ---
 def check_credentials():
@@ -152,18 +164,25 @@ if st.button("✨ Process Audio Files", type="primary", disabled=not uploaded_fi
             extracted_data = process_audio_file(file, model)
         
         if extracted_data:
+            # Patient ID may come as string; coerce safely to int when possible
+            raw_patient_id = extracted_data.get("patient_id", 0)
+            try:
+                patient_id_value = int(raw_patient_id)
+            except Exception:
+                patient_id_value = 0
+
             record = {
-                "patient_id": int(extracted_data.get("patient_id", 0)),
+                "patient_id": patient_id_value,
                 "patient_name": extracted_data.get("patient_name", "N/A"),
                 "patient_dose": extracted_data.get("patient_dose", "N/A"),
-                "notes_for_doctor": extracted_data.get("notes_for_doctor", "N/A"),
+                "notes": extracted_data.get("notes_for_doctor", extracted_data.get("notes", "N/A")),
                 "record_date": date.today().strftime('%Y-%m-%d'),
             }
             try:
-                sb.table("veterinary_records").insert(record).execute()
+                sb.schema(SUPABASE_SCHEMA).table("veterinary_records").insert(record).execute()
                 st.write(f"✅ Success: Data inserted into Supabase for {file.name}.")
             except Exception as e:
-                st.error(f"❌ Error inserting into Supabase for {file.name}: {e}")
+                st.error(f"❌ Error inserting into Supabase for {file.name}: {str(e)}")
             all_records.append(record)
         else:
             st.error(f"❌ Failed: Could not process {file.name}.")
@@ -180,7 +199,7 @@ if st.button("✨ Process Audio Files", type="primary", disabled=not uploaded_fi
             'patient_id': 'Patient ID',
             'patient_name': 'Patient Name',
             'patient_dose': 'Patient Dose',
-            'notes_for_doctor': 'Notes for Doctor',
+            'notes': 'Notes for Doctor',
             'record_date': 'Date'
         })
         final_df = final_df[['Patient ID', 'Patient Name', 'Patient Dose', 'Notes for Doctor', 'Date']]
